@@ -1,0 +1,7 @@
+1.  Finish discretize.f documentation.  Double check that references
+to PV kernels have been eliminated.  Double check transpose versus
+adjoint issue.
+
+2.  Move code for constructing near pointers into scattering_matrix.
+
+3.  

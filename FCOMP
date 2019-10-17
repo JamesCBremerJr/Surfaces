@@ -1,0 +1,13 @@
+for file in $@
+do
+if [ ! -r ${file}.o  ]
+then
+echo compiling ${file}.f ...
+${DSTRIP} ${file}.f > ${file}_tmp.f
+${FC} -c -o ${file}.o ${file}_tmp.f 
+rm -f ${file}_tmp.f
+else
+echo skipping ${file}.f ...
+fi
+done
+

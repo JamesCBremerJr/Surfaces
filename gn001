@@ -1,0 +1,4 @@
+ set terminal wxt
+ unset key
+ set title "discretization nodes 
+ splot "gn001.dat" with points pointtype 7 pointsize .25

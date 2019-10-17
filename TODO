@@ -1,0 +1,19 @@
+INTEGER*8 FIX UP FOR PRINT_SINGZ AS WELL!!!!!!!!
+
+
+1.  Finish discretize.f documentation.  Double check that references
+to PV kernels have been eliminated.  Double check transpose versus
+adjoint issue.
+
+2.  Move code for constructing near pointers into scattering_matrix.
+
+3.  Write iterative solver + more flexible cache code for comparison
+purposes
+
+4.  Construct a gloal error table?
+
+5.  Use LAPACK to factor the incoming and outgoing matrices?
+
+6.  Use a structure more general than an octree to specify 
+decompositions.
+

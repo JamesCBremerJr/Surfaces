@@ -1,0 +1,1233 @@
+        subroutine scattering_combine(ier,disc,eps,zk,n,eval,k,
+     -   iptrs,nidxsin,idxsin,nidxsout,idxsout,nneartars,ineartars,
+     -   nnearsrcs,inearsrcs,naux,evalaux,nin,evalin,
+     -   nout,evalout,krankout,iout,krankin,iin,heap,w,lw,lkeep)
+        implicit double precision (a-h,o-z)
+        dimension disc(1),eval(13,1),iptrs(1),w(1),heap(1)
+        dimension evalaux(13,1),inearsrcs(1),ineartars(1)
+        dimension iout(1),iin(1),idxsin(1),idxsout(1)
+        dimension evalin(13,1),evalout(13,1)
+        double complex zk
+c
+c       Combine a collection of scattering matrices S1,...,Sk given
+c       on regions R1,...,Rk to form a scattering matrix for the union
+c       of the R_j.
+c
+c       This is down by first constructing the matrix 
+c
+c                    ( S1           ) ( 0    T12  ... T1k )
+c          A = I +   (    S2        ) ( T21  0    ... T2k )
+c                    (       ...    ) (           ...     )
+c                    (           Sk ) ( Tk1  Tk2  ...  0  )
+c
+c       where T_ij is the interaction matrix with targets on the
+c       region Ri and sources on the region Rj.  The matrix A is
+c       then inverted and the uncompressed scattering matrix
+c
+c                     (S1           )
+c         U = A^{-1}  (   S2        )                                       (3)
+c                     (      ...    )
+c                     (          Sk )
+c
+c       is computed.  
+c
+c       In the next step, matrices Ain and Aout which account for incoming 
+c       and outgoing potentials on the combined region are formed and 
+c       factored as 
+c
+c         Ain   = R_in B_in
+c 
+c         Aout  = Bout R_out
+c
+c       where Bin and Bout are submatrices of Ain and Aout, 
+c       respectively.  Then the compressed scattering matrix
+c
+c         S = R_out U R_in
+c
+c       is formed.
+c
+c       It is possible that the inversion of the matrix A could be
+c       sped up using various Sherman-Morrison-Woodbury type tricks,
+c       but for the time-being this routine inverts it via dense
+c       LAPACK routines.
+c
+c
+c                            Input Parameters:
+c
+c   disc - a structure describing the discretization of the boundary
+c       surface
+c   eps - precision for the scattering matrix computations
+c   zk - wavenumber for the problem
+c   n - the number of discretization nodes on the boundary
+c   eval - a (13,n) array with the evaluation data
+c   
+c   nidxsin - 
+c   idxsin - 
+c
+c   nidxsout -
+c   idxsout - 
+c
+c   nnearsrcs -
+c   inearsrcs - 
+c
+c   nneartars - 
+c   ineartars - 
+c
+c   k - the number of scattering matrices which are to be combined
+c   iptrs - a integer array of length k whose entries are pointers
+c       into the heap to the scattering matrices which are to be
+c       combined
+c
+c   heap - the pointer to the beginning of the work array containing
+c       the scattering matrices
+c
+c   lw - the length of the user-supplied work array w
+c
+c                            Output Parameters:
+c
+c   ier - an error return code;
+c       ier = 0  indicates successful execution
+c       ier = 4  means that the work array w was of insufficient 
+c                length
+c
+c   w - upon successful execution, 
+c
+c   krankout - the number of 
+c   iout - this user-supplied integer array will contain the indices
+c       of the outgoing nodes for the combined region
+c
+c   krankin - 
+c
+c
+c   lkeep - the length of the newly created scattering matrix structure
+c
+c     
+c
+c   w(1) - the length of all smatr data including this element            (len)
+c   w(2) - the number of points in the outgoing skeleton                  (nout)
+c   w(3) - the number of points in the incoming skeleton                  (nin)
+c   w(4) - a pointer to the list of the outgoing skeleton nodes           (iout)
+c   w(5) - a pointer to the list of the incoming skeleton nodes           (iiin)
+c   w(6) - a pointer into the work array to the nout x nin scattering     (ismatr)
+c
+        ier   = 0
+        lkeep = 0
+c
+        call prinf("iptrs = *",iptrs,k)
+c
+c       Allocate memory         FIX THESE SIZES UP!!!!!
+c
+        nin0      = naux + nin  + nnearsrcs
+        nout0     = naux + nout + nneartars
+c
+c$$$        iaint     = 1
+c$$$        laint     = 2*nidxsin*nin0
+c$$$c
+c$$$        irint     = iaint+laint
+c$$$        lrint     = 2*ndixsin*nin0
+c$$$c
+c$$$        iatars    = irint+lrint
+c$$$        latars    = 2*nneartars*nidxsout
+c$$$c
+c$$$        iasrcs    = iatars+latars
+c$$$        lasrcs    = 2*nnearsrcs*nidxsin
+c$$$c
+c$$$        iaout     = iasrcs+lasrcs
+c$$$        laout     = 2*nidxsout*nout0
+c$$$c
+c$$$        irout     = iaout+laout
+c$$$        lrout     = 2*nidxsout*nout0
+c
+        ismatr    = 7
+        lsmatr    = 2*nidxsout*nidxsin
+c
+        iamatr    = ismatr+lsmatr
+        lamatr    = 2*nidxsout*nidxsin
+c
+        iw2       = iamatr+lamatr
+        lw2       = lw-iw2
+c
+        if (lw2 .lt. 0) then
+        ier = 4
+        return
+        endif
+c
+c       Call an auxilliary routine to shape arrays.
+c
+        n = nidxsin
+        m = nidxsout
+        call scattering_combine0(ier,eps,zk,disc,
+     -   k,n,m,w(iamatr),w(ismatr),
+     -   heap,iptrs,w(iw2),lw2,krankout,iout,krankin,iin)
+
+c        call scattering_combine0(ier,eps,zk,disc,k,iptrs,
+c     -   nidxsin,idxsin,nidxsout,idxsout,w(iamatr),
+c     -   w(iumatr),heap,w(iw2),lw2,krankout,iout,krankin,iin)
+        if (ier .ne. 0) return
+c
+c       Copy the scattering matrix at the beginning of the work array.
+c
+c        ismatr = 7
+c        lsmatr = 2*krankout*krankin
+c
+        iiout = ismatr+lsmatr
+        liout = krankout
+c
+        iiin  = iiout+liout
+        liin  = krankin
+c
+        lkeep = iiin+liin
+c
+        if (lkeep .gt. lw) then
+        ier = 4
+        return
+        endif
+c
+c
+c       Move the scattering matrix to the beginning of the
+c       work array for output.
+c
+c        do 2000 i=1,lsmatr
+c        w(ismatr+i-1) = w(iw2+i-1)
+c 2000 continue
+c
+        call scattering_imove(krankout,iout,w(iiout))
+        call scattering_imove(krankin,iin,w(iiin))
+c
+        w(1) = lkeep
+        w(2) = krankout
+        w(3) = krankin
+        w(4) = iiout
+        w(5) = iiin
+        w(6) = iumatr
+c
+        end
+
+
+        subroutine scattering_combine0(ier,eps,zk,disc,
+     -   k,n,m,amatr,smatr,
+     -   heap,iptrs,w,lw,krankout,iout,krankin,iin)
+        implicit double precision (a-h,o-z)
+        dimension disc(1),heap(1),iptrs(1),w(1),iout(1),iin(1)
+        double complex amatr(n,n),smatr(n,m)
+        double complex zk,sum
+c
+        ier = 0
+c
+c       Form the matrix A.
+c
+        amatr = 0
+        i1    = 1
+        i2    = 1
+        do 1100 i=1,k
+        iptri     =  iptrs(i)
+        krankouti =  heap(iptri+1)
+        krankini  =  heap(iptri+2)
+        iiini     =  heap(iptri+4)+iptri-1
+        ismatri   =  heap(iptri+5)+iptri-1
+c
+        j1        = 1
+        j2        = 1
+        do 1200 j=1,k
+c
+        iptrj     =  iptrs(j)
+        krankoutj =  heap(iptrj+1)
+        iioutj    =  heap(iptrj+3)+iptrj-1
+c
+        if (i .ne. j) then
+c
+c       Evaluate T_ij which captures the outgoing potential from region 
+c       j to region i.
+c
+        iw2       = 2*krankini*krankoutj+1
+        lw2       = lw-iw2
+c
+        ikernel = 3
+        call disc_eval(ier,disc,ikernel,zk,krankini,heap(iiini),
+     -    krankoutj,heap(iioutj),w,w(iw2),lw2)
+        if (ier .ne. 0) return
+c
+c       Multipole by S_i on the left.
+c
+        call scattering_mult(krankouti,krankoutj,krankini,heap(ismatri),
+     -    w,amatr(i2,j2),n)
+        endif
+        j2 = j2+krankoutj
+ 1200 continue
+        i2 = i2+krankouti
+ 1100 continue
+c
+        do 2000 i=1,n
+        amatr(i,i) = amatr(i,i)+1.0d0
+ 2000 continue
+c
+c       Invert A.
+c
+        call lapack_invert(ier,n,amatr,w,lw)
+        if (ier .ne. 0) return
+c
+c       Form the uncompressed scattering matrix u.
+c
+        i1=1
+        j1=1
+        do 3000 j=1,k
+        iptr     =  iptrs(j)
+        krankout =  heap(iptr+1)
+        krankin  =  heap(iptr+2)
+        ismatr   =  heap(iptr+5)+iptr-1
+c
+        call scattering_mult(n,krankin,krankout,amatr(1,i1),
+     -    heap(ismatr),smatr(1,j1),n)
+c
+        i1=i1+krankout
+        j1=j1+krankin
+ 3000 continue
+c
+        krankout = n
+        krankin  = m
+c
+        idx1     = 1
+        idx2     = 1
+c
+        do 4000 i=1,k
+        iptr      = iptrs(i)
+        krankout0 = heap(iptr+1)
+        krankin0  = heap(iptr+2)
+        iiout0    = heap(iptr+3)+iptr-1
+        iiin0     = heap(iptr+4)+iptr-1
+c
+        call scattering_imove(krankout0,heap(iiout0),iout(idx1))
+        call scattering_imove(krankin0,heap(iiin0),iin(idx2))
+c
+        idx1 = idx1+krankout0
+        idx2 = idx2+krankin0
+ 4000 continue
+c
+        end
+
+
+c$$$        subroutine scattering_combine0(ier,eps,zk,disc,k,iptrs,
+c$$$     -   nidxsin,idxsin,nidxsout,idxsout,
+c$$$     -   amatr,umatr,heap,w,lw,krankout,iout,krankin,iin)
+c$$$        implicit double precision (a-h,o-z)
+c$$$        dimension disc(1),heap(1),iptrs(1),w(1),iout(1),iin(1)
+c$$$        double complex amatr(nidxsout,nidxsout),umatr(nidxsout,nidxsin)
+c$$$        double complex zk,sum
+c$$$c
+c$$$        ier = 0
+c$$$c
+c$$$c       Form the matrix A.
+c$$$c
+c$$$        amatr = 0
+c$$$        i1    = 1
+c$$$        i2    = 1
+c$$$        do 1000 i=1,k
+c$$$        iptri     =  iptrs(i)
+c$$$        krankouti =  heap(iptri+1)
+c$$$        krankini  =  heap(iptri+2)
+c$$$        iiini     =  heap(iptri+4)+iptri-1
+c$$$        ismatri   =  heap(iptri+5)+iptri-1
+c$$$c
+c$$$        j1        = 1
+c$$$        j2        = 1
+c$$$        do 1100 j=1,k
+c$$$c
+c$$$        iptrj     =  iptrs(j)
+c$$$        krankoutj =  heap(iptrj+1)
+c$$$        iioutj    =  heap(iptrj+3)+iptrj-1
+c$$$c
+c$$$        if (i .ne. j) then
+c$$$c
+c$$$c       Evaluate T_ij which captures the outgoing potential from region 
+c$$$c       j to region i.
+c$$$c
+c$$$        iw2       = 2*krankini*krankoutj+1
+c$$$        lw2       = lw-iw2
+c$$$c
+c$$$        ikernel = 3
+c$$$        call disc_eval(ier,disc,ikernel,zk,krankini,heap(iiini),
+c$$$     -    krankoutj,heap(iioutj),w,w(iw2),lw2)
+c$$$        if (ier .ne. 0) return
+c$$$c
+c$$$c       Multipole by S_i on the left.
+c$$$c
+c$$$        call scattering_mult(krankouti,krankoutj,krankini,heap(ismatri),
+c$$$     -    w,amatr(i2,j2),nidxsout)
+c$$$        endif
+c$$$        j2 = j2+krankoutj
+c$$$ 1100 continue
+c$$$        i2 = i2+krankouti
+c$$$ 1000 continue
+c$$$c
+c$$$        do 1200 i=1,nidxsout
+c$$$        amatr(i,i) = amatr(i,i)+1.0d0
+c$$$ 1200 continue
+c$$$c
+c$$$c       Invert A.
+c$$$c
+c$$$        call lapack_invert(ier,nidxsout,amatr,w,lw)
+c$$$c
+c$$$        if (ier .ne. 0) return
+c$$$c
+c$$$c       Form the uncompressed scattering matrix u.
+c$$$c
+c$$$        i1=1
+c$$$        j1=1
+c$$$        do 2000 j=1,k
+c$$$        iptr     =  iptrs(j)
+c$$$        krankout =  heap(iptr+1)
+c$$$        krankin  =  heap(iptr+2)
+c$$$        ismatr   =  heap(iptr+5)+iptr-1
+c$$$c
+c$$$        call scattering_mult(n,krankin,krankout,amatr(1,i1),
+c$$$     -    heap(ismatr),umatr(1,j1),nidxsout)
+c$$$c
+c$$$        i1=i1+krankout
+c$$$        j1=j1+krankin
+c$$$ 2000 continue
+c$$$
+c$$$c
+c$$$c       Form the matrix Aout and factor it.
+c$$$c
+c$$$        krankout = nidxsout
+c$$$        krankin  = nidxsin
+c$$$c
+c$$$        idx1     = 1
+c$$$        idx2     = 1
+c$$$c
+c$$$        do 3000 i=1,k
+c$$$        iptr      = iptrs(i)
+c$$$        krankout0 = heap(iptr+1)
+c$$$        krankin0  = heap(iptr+2)
+c$$$        iiout0    = heap(iptr+3)+iptr-1
+c$$$        iiin0     = heap(iptr+4)+iptr-1
+c$$$c
+c$$$        call scattering_imove(krankout0,heap(iiout0),iout(idx1))
+c$$$        call scattering_imove(krankin0,heap(iiin0),iin(idx2))
+c$$$c
+c$$$        idx1 = idx1+krankout0
+c$$$        idx2 = idx2+krankin0
+c$$$ 3000 continue
+c$$$c
+c$$$c        call scattering_move(2*krankout*krankin,umatr,w)
+c$$$c
+c$$$        end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        subroutine scattering_combine0(ier,disc,zk,n,m,amatr,smatr,t,
+     -   bmatr,heap,k,iptrs,kranksin,kranksout,w,lw)
+        implicit double precision (a-h,o-z)
+        double complex amatr(n,n),smatr(n,m),t(1),bmatr(1)
+        dimension heap(1),kranksin(1),kranksout(1),w(1),iptrs(1)
+        double complex zk,sum
+c
+c       Form the matrix A.
+c
+cccccccccccccccccccccccccc REMOVE AMATR=0
+        amatr = 0
+c
+        i1=1
+        do 1000 i=1,k
+        j1=1
+        do 1100 j=1,k
+c
+        krankouti = kranksout(i)
+        krankini  = kranksin(i)
+        krankoutj = kranksout(j)
+        krankinj  = kranksin(j)
+c
+        iptri     = iptrs(i)
+        iptrj     = iptrs(j)
+c
+        ismatri   = heap(iptri+5)+iptri-1
+        iiini     = heap(iptri+4)+iptri-1
+        iioutj    = heap(iptrj+3)+iptrj-1
+c
+        if (i .eq. j) then
+c
+        do 1400 l1=1,krankouti
+        do 1500 l2=1,krankoutj
+        amatr(i1+l1-1,j1+l2-1) = 0
+ 1500 continue
+        amatr(i1+l1-1,j1+l1-1) = 1
+ 1400 continue
+        else
+        call scattering_combine1(ier,disc,zk,krankouti,krankini,
+     -    krankoutj,krankinj,heap(ismatri),t,bmatr,heap(iiini),
+     -    heap(iioutj),w,lw)
+        do 1200 l1=1,krankouti
+        do 1300 l2=1,krankoutj
+        amatr(i1+l1,j1+l2) = bmatr(l1+(l2-1)*krankouti)
+ 1300 continue
+ 1200 continue
+        endif
+c
+        j1 = j1 + krankoutj
+ 1100 continue
+        i1 = i1 + krankouti
+ 1000 continue
+c
+c       Invert the matrix A.
+c
+        call print_singz("amatr sings = *",n,n,amatr)
+        stop
+c
+        call lapack_invert(ier,n,amatr,w,lw)
+        if (ier .ne. 0) return
+c
+        call print_singz("amatr sings = *",n,n,amatr)
+c
+c       Apply the local scattering matrices on the right.
+c
+c                    (S1           )
+c         U = A^{-1} (   S2        )                                       (3)
+c                    (      ...    )
+c                    (          Sk )
+c
+c
+c          
+c          A1 (n, krankout1)  S1(krankout1, krankin1)
+c          A2 (n, krankout2)  S2(krankout2, krankin2)
+c
+c          (A1S1 S2A2 S3A3   )
+c
+c       Form the matrix U; each iterations applies one of the scattering
+c       matrices.
+c
+        j1 = 0
+        j2 = 0
+        do 2000 j=1,k
+
+        krankoutj = kranksout(j)
+        krankinj  = kranksin(j)
+c
+        iptrj     = iptrs(j)
+        ismatrj   = heap(iptrj+5)+iptrj-1
+c
+        do 2100 l1=1,n
+        do 2200 l2=1,krankinj
+        sum = 0
+        do 2300 l3=1,krankoutj
+        idx = ismatrj + (l3-1) + (l2-1)*krankoutj
+        sum = sum + amatr(l1,j1+l3)*heap(idx)
+ 2300 continue
+        smatr(l1,j2+l2) = sum
+ 2200 continue
+ 2100 continue
+c
+        j1 = j1 + krankoutj
+        j2 = j2 + krankinj
+ 2000 continue
+c      
+        call print_singz("smatr sings = *",n,m,smatr)
+        stop
+        end
+
+       
+
+        subroutine scattering_combine1(ier,disc,zk,krankouti,krankini,
+     -    krankoutj,krankinj,smatri,tij,amatr,iini,ioutj,w,lw)
+        implicit double precision (a-h,o-z)
+        double complex tij(krankini,krankoutj)
+        double complex smatri(krankouti,krankini)
+        double complex amatr(krankouti,krankoutj)
+        dimension iini(1),ioutj(1),w(1)
+        double complex sum,zk
+c
+c       Form the matrix T_ij.
+c
+        ikernel = 3
+        call disc_eval(ier,disc,ikernel,zk,krankini,iini,
+     -    krankoutj,ioutj,tij,w,lw)
+c
+        if (ier .ne. 0) return
+c
+c       Form the product A_ij = S_i T_ij 
+c
+        do 1000 i=1,krankouti
+        do 1100 j=1,krankoutj
+        sum = 0
+        do 1200 l=1,krankini
+        sum = sum + smatri(i,l)*tij(l,j)
+ 1200 continue
+        amatr(i,j) = sum
+ 1100 continue
+ 1000 continue
+c
+        end
+
+
+        subroutine create_smatr2(ier,ibox,eps,n,zk,eval,iflags,
+     -    nin,evalin,nout,evalout,
+     -    naux0,disc,oc,
+     -    inearidxs,inearptrs,w,lw)
+        implicit double precision (a-h,o-z)
+        dimension disc(1),oc(1),w(1)
+        dimension eval(13,n),evalin(13,nin),evalout(13,nout)
+        dimension ismatrptrs(1)
+        dimension inearidxs(1),inearptrs(4,n)
+c
+        dimension iflags(2,n)
+c
+        double complex val,zk
+c
+        double precision, allocatable :: evalaux(:,:),w0(:)
+c
+        double complex, allocatable   :: smatr(:,:),sinv(:,:)
+        double complex, allocatable   :: xx(:,:),yy(:,:)
+c
+        double complex, allocatable   :: aout(:,:),rout(:)
+        integer, allocatable          :: icolsout(:)
+c
+        double complex, allocatable   :: aint(:,:),rint(:)
+        integer, allocatable          :: icolsin(:)
+c
+c
+        integer, allocatable :: idxs(:),idxssrc(:),idxstar(:)
+        integer, allocatable :: iproximate(:)
+c
+        integer, allocatable :: ilocal(:),inearsrcs(:),ineartars(:)
+c
+c       NEED TO PASS ARRAYS FOR:
+c
+c        idxs, iproximate, inear
+c       
+c
+
+c
+c       Construct a scattering matrix for a user-specified portion
+c       of the surface.  This subroutine constructs such a matrix
+c       at the lowest level of the hiearchical decomposition of the
+c       input surface.
+c
+c       This is done by first constructing matrices Ain and Aout which
+c       account for incoming and outgoing potentials and factoring
+c       them as 
+c
+c         Ain   = R_in B_in
+c 
+c         Aout  = Bout R_out
+c
+c       where Bin and Bout are submatrices of Ain and Aout, 
+c       respectively.
+c
+c       Next the restriction T of the integral operator (1) to the 
+c       specified region is constructed and inverted.  The scattering
+c       matrix is 
+c
+c         S     = Rout T^{-1} R_in.
+c
+c                               Input Parameters:
+c
+c   n - the number of total discretization nodes on the boundary surface
+c   zk - the complex-valued wavenumber for the problem
+c   eval - a (13,n) array providing evaluation data for all 
+c       discretization nodes on the surface
+c
+c   nin - the number of evaluation nodes on the contour which specifies
+c       incoming potentials
+c   evalin - the (13,n) array which specifies the evaluation data for
+c       incoming potentials
+c
+c   nout - the number of evaluation nodes on the contout which specifies
+c        outgoing potentials
+c   evalout - 
+c
+c   iflags - a (2,n) integer array keeps track of which target and 
+c       source nodes are still extant
+c
+c   inearidxs - an integer array storing the indices
+c   inearptrs - a (2,n) array which specifies
+c
+c   w - a user-supplied work array
+c   lw - the length of the user-supplied work array
+c
+c
+c                              Output parameters:
+c
+c
+c   ier - an error return code;
+c       ier = 0     indicates successful execution
+c       ier = 4     means that the work array was of insufficient length
+c       ier = 1000
+c
+c   w - upon successful execution, the beginning of the work array
+c       will contain the scattering matrix; 
+c
+c   w(1) - the number of points in the target skeleton                    (nout)
+c   w(2) - the number of points in the source skeleton                    (nin)
+c   w(3) - a pointer to the indices of the target skeleton                (iiout)
+c   w(4) - a pointer to the indices of the source skeleton                (iin)
+c   w(5) - a pointer to the (nout,nin) scattering matrix                  (ismatr)
+c
+c       NOTE: all pointers are relative to the beginning of the structure
+c
+        ier = 0
+c
+c       Allocate some temporary variables from the beginning of the work
+c       array.
+c
+        
+c
+c       SOME REAL MEMORY PROBLEMS HERE!!!!
+c      
+c
+c
+c       Fetch some parameters from the structures.
+c
+        dnear = disc(99)
+c
+c       Find the indices of the points in the box.
+c
+        allocate(idxs(n),iproximate(n),ilocal(n))
+        allocate(inearsrcs(n),ineartars(n))
+c
+        call ocpoints(oc,ibox,nidxs,idxs)
+        call prinf("in create_smatr, idxs = *",idxs,nidxs)
+c
+c       Mark all nodes in the box as being unavailable as both
+c       targets and sources.
+c
+        do 1000 i=1,nidxs
+        iflags(1,idxs(i)) = 1
+        iflags(2,idxs(i)) = 1
+ 1000 continue
+c
+c       Construct a bounding ball for near interactions.
+c
+        call scattering_bounding_ball0(nidxs,idxs,eval,bx,by,bz,br)
+c
+c       Find the set of "proximate" near interactions.
+c
+        br  = br*dnear
+        call ocrange(oc,bx,by,bz,br,nproximate,iproximate)
+c
+c       Construct the list of "discretization" near interactions.
+c
+        nneartars = 0
+        do 2000 i=1,n
+        ilocal(i) = iflags(1,i)
+ 2000 continue
+c
+        do 2100 ii=1,nproximate
+        i = iproximate(ii)
+        if (ilocal(i) .eq. 0) then
+        nneartars = nneartars+1
+        ineartars(nneartars) = i
+        ilocal(i) = 1
+        endif
+ 2100 continue
+c
+        do 2200 i=1,nidxs
+        ii = idxs(i)
+c
+        nn   = inearptrs(3,i)
+        iptr = inearptrs(4,i)
+        do 2300 jj=1,nn
+        j = inearidxs(jj)
+        if (ilocal(j) .eq. 0) then
+        ilocal(j) = 1
+        nneartars = nneartars+1
+        ineartars(nneartars) = j
+        endif
+ 2300 continue
+ 2200 continue
+c
+        call quicksorti(nneartars,ineartars)
+        call prinf("nneartars = *",nneartars,1)
+        call prinf("ineartars = *",ineartars,nneartars)
+c
+c       Construct the auxilliary target contour.
+c
+        nauxeval = 0
+c
+c       Form the matrix Aout and factor it as Aout = Bout * Rin
+c
+        irout     = 1
+        lrout     = 2*nidxs*nout
+c
+        iaout     = irout+lrout
+        laout     = 2*nidxs*nout
+c
+        iw2       = iaout+laout
+        lw2       = lw-iw2
+c
+        if (lw2 .lt. 0) then
+        ier = 4
+        return
+        endif
+c
+        nnout = nout
+        allocate(rout(nidxs*nnout),icolsout(nidxs))
+        allocate(aout(nnout,nidxs))
+c
+        do 3000 jj=1,nidxs
+        j = idxs(jj)
+        do 3200 i=1,nout
+        call ksingle(evalout(1,i),eval(1,j),zk,val)
+        aout(i,jj) = val
+ 3200 continue
+ 3000 continue
+c
+        if (lw2 .lt. 2*(3*(nidxs+1)*nnout+1)) then
+        ier = 4
+        return
+        endif
+c
+        call factor_right(eps,nnout,nidxs,aout,krankout,icolsout,rout,
+     -    w(iw2))
+        deallocate(aout)
+c
+c       Form the matrix Ain^t.
+c
+        nnin = nin
+        allocate(icolsin(nnin),rint(nnin*nidxs))
+        allocate(aint(nnin,nidxs))
+        do 3300 jj=1,nidxs
+        j = idxs(jj)
+        do 3400 i=1,nin
+        call ksingle(eval(1,j),evalin(1,i),zk,val)
+        aint(i,jj) = val
+ 3400 continue
+ 3300 continue
+c
+        if (lw2 .lt. 2*(3*(nidxs+1)*nnin+1)) then
+        ier = 4
+        return
+        endif
+c
+        call factor_right(eps,nnin,nidxs,aint,krankin,icolsin,rint,
+     -    w(iw2))
+        deallocate(aint)
+c
+c
+c       Form and invert the diagonal operator.
+c
+        allocate(smatr(nidxs,nidxs))
+        ikernel = 3
+        zk      = 1.0d0
+        call disc_eval(ier,disc,ikernel,zk,nidxs,idxs,
+     -    nidxs,idxs,smatr,w(iw2),lw2)
+        call prinf("after disc_eval, ier = *",ier,1)
+        if (ier .ne. 0) return
+c
+        do 4000 i=1,nidxs
+        smatr(i,i) = smatr(i,i) + 0.5d0
+ 4000   continue
+c
+        call lapack_invert(ier,nidxs,smatr,w(iw2),lw2)
+        call prinf("after lapack_invert, ier = *",ier,1)
+        if (ier .ne. 0) return
+c
+c$$$        call print_singz("smatr sings = *",nidxs,nidxs,smatr)
+c
+c       Form the scattering matrix proper by taking the product
+c
+c          R_out (krank) S^{-1} R_in  = R_out S^{-1} ((R_in)^t)^t
+c
+c
+        allocate(xx(krankout,nidxs),yy(krankout,krankin))
+c
+        call apply_left(nidxs,nidxs,krankout,icolsout,rout,smatr,xx)
+        call apply_rightt(nidxs,krankout,krankin,icolsin,rint,xx,yy)
+c
+        call print_singz("smatr sings = *",krankout,krankin,yy)
+        stop
+c
+c
+c
+c       Form the lists of retained targets and sources.
+c
+c$$$        krankout = nidxs
+c$$$        krankin  = nidxs
+c$$$        allocate(idxstar(krankout),idxssrc(krankin))
+c$$$c
+c$$$        do 5000 i=1,nidxs
+c$$$        idxstar(i) = i
+c$$$ 5000 continue
+c$$$        do 5100 i=1,nidxs
+c$$$        idxssrc(i) = i
+c$$$ 5100 continue
+         
+        allocate(idxstar(krankout),idxssrc(krankin))
+c
+        do 5000 i=1,krankout
+        idxstar(i) = idxs(icolsout(i))
+ 5000 continue
+        do 5100 i=1,krankin
+        idxssrc(i) = idxs(icolsin(i))
+ 5100 continue
+        call prinf("idxstar = *",idxstar,krankout)
+        call prinf("idxssrc = *",idxssrc,krankin)
+c
+c       Copy the scattering matrix and its associated data into the heap,
+c       store the length of the data.
+c
+        ismatr     = 7
+        lsmatr     = 2*krankout*krankin
+c
+        iisrcs     = ismatr+lsmatr
+        lisrcs     = krankin
+c
+        iitars     = iisrcs+lisrcs
+        litars     = krankout
+c
+        len        = iitars+litars
+c
+        w(1)       = len
+        w(2)       = krankout
+        w(3)       = krankin
+        w(4)       = iisrcs
+        w(5)       = iitars
+        w(6)       = ismatr
+c
+        call scattering_move(2*krankout*krankin,yy,w(ismatr))
+c
+c        call scattering_move(2*krankout*krankin,smatr,w(ismatr))
+c
+        call scattering_imove(krankout,idxstar,w(iitars))
+        call scattering_imove(krankin,idxssrc,w(iisrcs))
+c
+c       Mark the retained sources and targets in the flags array.
+c
+        do 6000 i=1,krankout
+        iflags(1,idxstar(i)) = 0
+ 6000 continue
+        do 6100 i=1,krankin
+        iflags(2,idxssrc(i)) = 0
+ 6100 continue
+c
+        end
+c
+c       CHANGE OUTPUT NAME FROM NIN,NOUT TO KRANKIN, KRANKOUT
+c
+c       RENAME THE MATRIX SMATR IN CREATE_SMATR CORRECTLY ??
+c
+c       terminology in general could use some cleaning up ---- 
+c
+c       LAPACK INVERT ----> use work array
+c      
+c       ADD BLAS MULTIPLYS
+c
+c       MEMORY MANAGEMENT ISSUES
+c
+c       TRY TO DO ALLOCATION AS LOCALLY AS POSSIBLE
+c
+c       !!!!CAREFUL OF OPTIMIZATION WITH OVERLAPPING MOVE!!!!
+c
+c
+c       blas_multiply
+c       blas_multiply2
+c
+
+c$$$c
+c$$$c       Zero all of the pointers and the flags.
+c$$$c
+c$$$        call izero(nboxes,w(iiptrs))
+c$$$        call izero(2*n,w(iiflags))
+c$$$c
+c$$$        call disc_data(disc,w(ieval))
+c$$$c
+c$$$c       Construct scattering matrices on the lowest level.
+c$$$c
+c$$$        call oclevel(oc,nlevels,nboxes,iboxes)
+c$$$c
+c$$$        call prinf("in scattering_matrix, lowest level boxes = *",
+c$$$     -    iboxes,nboxes)
+c$$$c
+c$$$        do 1000 ii=1,nboxes
+c$$$        ibox = iboxes(ii)
+c$$$        call prinf("in scattering_matrix, ibox = *",ibox,1)
+c$$$c
+c$$$        call create_smatr(ier,ibox,eps,n,zk,w(ieval),w(iiflags),
+c$$$     -    nin,evalin,
+c$$$     -    nout,evalout,
+c$$$     -    naux,disc,oc,inear(iinearidxs),
+c$$$     -    inear(iinearptrs),w(iheap),lheap)
+c$$$c
+c$$$        if (ier .ne. 0) return
+c$$$c
+c$$$c       Record the index of the scattering matrix.
+c$$$c
+c$$$
+c$$$ 1000 continue
+c$$$c
+c$$$c       Recursively combine scattering matrices level-by-level.
+c$$$c
+c$$$c        do 1100 ilevel=nlevels-1,1
+c$$$c        call oclevel(oc,ilevel,nboxes,iboxes)
+c$$$c        call prinf("in scattering_matrix, ilevel = *",ilevel,1)
+c$$$c 1100 continue
+c
+c       1.   DON'T ALLOW CONSTANT TIMES ID TO BE MODIFIED
+c
+c       2.   FIX PROBLEM THAT WE ADDRESS --- EXTERIOR NEUMANN FOR LAPLACE!
+c
+c       2.   DO NOT INVERT SMATR IN PLACE ... NEED TO COPY OUT NEAR
+c            INTERACITON DATA AT SOME POINT
+c
+c       3.  
+c     
+
+c
+c
+c       Ain ^ t = \tilde{Ain^t} R_in^t
+c
+c       Aout    = \tilde{Aout}  R_out
+c
+c
+c       Aout S^{-1}  Ain
+c
+c       \tilde{Aout} R_out  Smatr^{-1}  (R_in^t)^t \tilde{Ain_t}^t
+c
+c       R_out Smatr 
+c
+c
+c
+
+        subroutine surface(iparam,s,t,r,dr)
+        implicit double precision (a-h,o-z)
+        dimension r(3),dr(3,2)        
+c
+c       Supply a parameterization of the torus formed by revolving a
+c       circle of radius b in the zy plane about the circle of radius
+c       a in the xy plane.
+c
+        a = 2.0d0
+        b = 0.5d0
+c
+        r(1)    = (a+b*cos(s))*sin(t)
+        r(2)    = (a+b*cos(s))*cos(t)
+        r(3)    = b*sin(s)
+c
+        dr(1,1) = -b*sin(s)*sin(t)
+        dr(2,1) = -b*sin(s)*cos(t)
+        dr(3,1) = b*cos(s)
+c
+        dr(1,2) = (a+b*cos(s))*cos(t)
+        dr(2,2) = -(a+b*cos(s))*sin(t)
+        dr(3,2) = 0
+c
+        return
+        end
+
+
+
+        subroutine scattering_matrix(disc,ikernel,zk,
+     -    nin,evalin,ikernelin,
+     -    nout,evalout,ikernelout,
+     -    naux,
+     -    w,lw)
+        implicit double precision (a-h,o-z)
+        dimension disc(1),oc(1)
+c
+c       This subroutine is the user-callable interface to the 
+c       accelerated direct solver.  Its principal 
+c
+c
+c                            Input Parameters:
+c
+c  disc - structure describing the discretization of the scatterer
+c
+c  nin - 
+c  evalin - 
+c  
+c  nout - 
+c  evalout - 
+c
+c  naux - the square root of the number of points per wavelength^2 
+c      which should be sampled on auxilliary contours --- in other words,
+c      naux^2 points are used to discretize an auxilliary contour of
+c      area 1 wavelength^2
+c
+
+c
+c       Build the near interaction lists.
+c
+        
+c
+c       Construct a heap
+c
+        end
+
+
+
+        subroutine near_lists(ier,disc,oc,inear,linear,lkeep)
+        implicit double precision (a-h,o-z)
+        dimension disc(1),oc(1),inear(1)
+c
+        integer, allocatable :: iwork(:)
+c      
+        ier = 0
+c
+c       Fetch some data from the disc array.
+c
+        ntris = disc(4)
+        len   = disc(5)
+        itris = disc(6)
+        nquad = disc(20)
+        ixs   = disc(21)
+        iys   = disc(22)
+        iwhts = disc(23)
+c
+        n = nquad*ntris
+c
+c       Allocate work arrays from the heap.
+c
+        allocate(iwork(n))
+c
+c       Allocate some memory from inear array.
+c
+        iinearptrs  = 100
+        linearptrs  = 4*n
+c
+        iinearidxs  = iinearptrs+linearptrs
+        linearidxs  = linear-iinearidxs
+c
+        if (linearidxs .le. 0) then
+        ier = 4
+        return
+        endif
+c
+c       Construct near target lists.
+c
+        call near_lists0(ier,oc,n,nquad,ntris,len,disc(itris),iwork,
+     -    inear(iinearptrs),inear(iinearidxs),linearidxs)
+        if (ier .ne. 0) return
+c
+        lkeep = iinearidxs+linearidxs
+c
+        inear(1) = n
+        inear(2) = iinearptrs
+        inear(3) = iinearidxs
+c
+        end
+
+
+        subroutine near_lists0(ier,oc,n,nquad,ntris,len,tris,iwork,
+     -    inearptrs,inearidxs,linearidxs)
+        implicit double precision (a-h,o-z)
+        dimension tris(len,1),inearptrs(4,n),inearidxs(1),iwork(1)
+c
+        dimension idxs(nquad)
+c
+        iptr = 1
+c
+c       First, construct the lists of near targets for each point.
+c
+        do 1000 jtri=1,ntris
+c
+        x0 = tris(8,jtri)
+        y0 = tris(9,jtri)
+        z0 = tris(10,jtri)
+c
+        r0 = sqrt(tris(11,jtri))*2.0d0
+c
+        call ocrange(oc,x0,y0,z0,r0,nn,iwork)
+        if (iptr + nn .gt. linearidxs) then
+        ier = 4
+        return
+        endif
+c
+        call quicksorti(nn,iwork)
+c
+        do 1111 i=1,nquad
+        idxs(i)=(jtri-1)+i
+ 1111 continue
+c
+        call iremove(nn,iwork,nquad,idxs)
+c
+        do 1100 j=1,nn
+        inearidxs(iptr+j-1) = iwork(j)
+ 1100 continue
+c    
+        do 1200 j=1,nquad
+        jj = (jtri-1)*nquad+j
+        inearptrs(3,jj) = nn
+        inearptrs(4,jj) = iptr
+ 1200 continue
+c
+        iptr=iptr+nn
+ 1000 continue
+c
+c       Count the number of near sources for each target point.
+c
+        do 2000 i=1,n
+        inearptrs(1,i) = 0
+ 2000 continue
+c
+        do 2100 i=1,n
+        nn = inearptrs(3,i)
+        i1 = inearptrs(4,i)
+c
+        do 2200 l=1,nn
+        idx = inearidxs(i1+l-1)
+        inearptrs(1,idx) = inearptrs(1,idx)+1
+ 2200 continue
+ 2100 continue
+c
+        
+c
+c       Allocate memory for the lists.
+c
+        do 2300 i=1,n
+        nn = inearptrs(1,i)
+        inearptrs(2,i) = iptr
+        iptr = iptr + nn
+ 2300 continue
+        if (iptr .gt. linearidxs) then
+        ier = 4
+        return
+        endif
+c
+c       Form the lists of near sources.
+c
+        do 3000 i=1,n
+        inearptrs(1,i) = 0
+ 3000 continue
+c
+        do 3100 i=1,n
+        nn = inearptrs(3,i)
+        i1 = inearptrs(4,i)
+c
+        do 3200 l=1,nn
+        idx = inearidxs(i1+l-1)
+        mm = inearptrs(1,idx)
+        j1 = inearptrs(2,idx)
+        inearidxs(j1+mm) = i
+        mm = mm + 1
+        inearptrs(1,idx) = mm
+ 3200 continue
+ 3100 continue
+c
+        linearidxs = iptr
+        end
+
+
+

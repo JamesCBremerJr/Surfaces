@@ -1,0 +1,9 @@
+#!/bin/sh
+
+rm -f *.o
+rm -f gn*
+rm -f int2
+rm -f fort.*
+rm -f *~
+rm -f gmon.out
+rm -f *.eps

@@ -1,0 +1,948 @@
+
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+c
+c       This is the end of the debugging code and beginning of the 
+c       quadrature code.
+c
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+c
+c
+c       The following subroutines are user-callable:
+c
+c   radial_init - read a precomputed table of quadraturs from a 
+c       text file on the disk.
+c
+c   raddiag - return a quadrature for integrating a function of the 
+c        form (1) over a triangle containing the origin.
+c
+c   radquad - return a quadrature for integrating a function of the
+c        form (1) over a triangle
+c
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+
+        subroutine radquad(ier,verts,n,norder,nquad,xs,ys,whts)
+        implicit double precision (a-h,o-z)
+        dimension verts(2,3),xs(1),ys(1),whts(1)
+c
+        double precision, allocatable :: ts(:),twhts(:)
+c
+        ier   = 0
+        nquad = 0
+c
+        allocate(ts(2*n+10),twhts(2*n+10))
+c
+c       Extract the coordinates of the vertices and determine the
+c       cut-off radius.
+c
+        x1 = verts(1,1)
+        y1 = verts(2,1)
+c
+        x2 = verts(1,2)
+        y2 = verts(2,2)
+c
+        x3 = verts(1,3)
+        y3 = verts(2,3)
+c
+c$$$        call linedist(x1,y1,x2,y2,dd1)
+c$$$        call linedist(x2,y2,x3,y3,dd2)
+c$$$        call linedist(x1,y1,x3,y3,dd3)
+c$$$c
+c$$$        rcut = min(dd1,dd2)
+c$$$        rcut = min(dd3,rcut)
+c$$$        rcut = rcut/2
+c
+c       Build quadratures for each subtriangle.
+c
+        call radquad0(norder,n,x1,y1,x2,y2,
+     -   nquad0,xs(nquad+1),ys(nquad+1),whts(nquad+1),
+     -   ts,twhts)
+        nquad = nquad+nquad0
+c
+        call radquad0(norder,n,x1,y1,x3,y3,
+     -    nquad0,xs(nquad+1),ys(nquad+1),whts(nquad+1),
+     -   ts,twhts)
+        nquad = nquad+nquad0
+c
+        call radquad0(norder,n,x2,y2,x3,y3,
+     -    nquad0,xs(nquad+1), ys(nquad+1),whts(nquad+1),
+     -   ts,twhts)
+        nquad = nquad+nquad0
+c
+        end
+
+
+
+        subroutine radquad0(norder,n,x1,y1,x2,y2,
+     -   nquad,xs,ys,whts,ts,twhts)
+        implicit double precision (a-h,o-z)
+        dimension rad(1),xs(1),ys(1),whts(1),verts(2,3)
+        dimension ts(1),twhts(1)
+c
+        dimension amatr(2,2),ainv(2,2)
+c
+c        double preci
+c        dimension ts(100 000),twhts(100 000)
+c
+        data pi      / 3.14159265358979323846264338327950288d0 /
+c
+        nquad = 0
+c
+        call radtransform(x1,y1,x2,y2,alpha,phi,amatr,ainv,det)
+c
+c       Build the theta quadratrure
+c
+        dd  = 3.9d0
+        nts = 0
+        h   = n
+        h   = dd/n
+c
+        do 1000 k=-n,n
+        t    = (tanh(pi/2*sinh(k*h))+1)/2
+        twht = (h*pi/2*cosh(k*h)*1.0d0/cosh(pi/2*sinh(k*h))**2)/2
+        nts        = nts+1
+        ts(nts)    = t
+        twhts(nts) = twht
+ 1000 continue
+c
+c       Call an auxillary routine to build the product quadrature.
+c
+        call raddiag1(nts,ts,twhts,
+     -    nquad,xs,ys,whts,alpha,phi)
+c
+        do 1100 i=1,nquad
+        x   = xs(i)
+        y   = ys(i)
+        wht = whts(i)
+c
+        u = ainv(1,1)*x+ainv(1,2)*y
+        v = ainv(2,1)*x+ainv(2,2)*y
+        wht=wht/det
+c
+        xs(i) = u
+        ys(i) = v
+        whts(i) = wht
+ 1100 continue
+        end
+
+
+        subroutine radial_init(ier,norder,rad,lrad,lkeep)
+        implicit double precision (a-h,o-z)
+        dimension rad(1)
+        dimension rs(2,1000),ts(2,1000)
+        character*2 str
+        character*14 filename
+c
+c       Read a table of precomputed quadrature rules from a file
+c       on the disk into the user-supplied array.  The table is
+c       stored in the file ``radquads??.txt'' where ?? is the order
+c       of the quadrature rules.
+c
+c                            Input Parameters:
+c
+c   norder - the order of the quadrature rules; at the present time,
+c       norder can be 4, 8, 12, 16 or 20
+c   lrad - length of the user-supplied array rad which will hold the
+c       quadrature table
+c
+c                            Output Parameters:
+c
+c   ier - an error return code;
+c       ier = 0    indicates successful execution
+c       ier = 4    mean that the user-supplied array rad is of 
+c                  insufficient length
+c       ier = 128  means that the input file could not be opened
+c       ier = 1024 means that a formatting error was encountered while
+c                  attempting to read the table of radial quadratures
+c                  from the disk
+c
+c   rad - on return, this user-supplied array will contain a quadrature
+c       table and a structure header describing the quadratures
+c
+c
+ 0050 format ("radquads",I2.2,".txt")
+ 0100 format (I3.3)
+ 0200 format (D44.36)
+c
+        ier   = 0
+        lkeep = 0
+c
+        max   = 1000
+c
+        write(filename,0050) norder
+c
+        iw = 101
+        open(iw,FILE=filename,STATUS='old',ERR=1000)
+c
+c       Grab the header data.        
+c
+        read(iw,0100) nr
+        read(iw,0100) nt
+c
+c       Read the parameter intervals.
+c
+        read (iw,0200) (rs(1,j),rs(2,j),j=1,nr)
+        read (iw,0200) (ts(1,j),ts(2,j),j=1,nt)
+c
+        call prin2("in radial_init, rs = *",rs,2*nr)
+        call prin2("in radial_init, ts = *",ts,2*nt)
+c
+c       Fill out the header of the rad structure.
+c
+        nlege = (norder)/2+1
+c
+        irs = 100
+        lrs = 2*nr
+c
+        its = irs+lrs
+        lts = 2*nt
+c
+        ixslege = its+lts
+        lxslege = nlege
+c
+        iwhtslege = ixslege+lxslege
+        lwhtslege = nlege
+c
+        ins = iwhtslege+lwhtslege
+        lns = nr*nt
+
+        ixs = ins+lns
+        lxs = max*nt*nr
+c
+        iwhts = ixs+lxs
+        lwhts = max*nr*nt
+c
+        lkeep = iwhts+lwhts
+c
+        if (lkeep .gt. lrad) then
+        ier = 4
+        return
+        endif
+c
+        rad(1)  = nr
+        rad(2)  = nt
+        rad(3)  = irs
+        rad(4)  = its
+        rad(5)  = ins
+        rad(6)  = ixs
+        rad(7)  = iwhts
+        rad(8)  = max
+c
+        rad(10) = nlege
+        rad(11) = ixslege
+        rad(12) = iwhtslege
+c
+        rad(21) = norder
+c
+c       Construct the Legendre quadrature.
+c
+        call legequad(nlege,rad(ixslege),rad(iwhtslege))
+c
+c       Copy the as and bs into the array.
+c
+        call radmove(nr*2,rs,rad(irs))
+        call radmove(nt*2,ts,rad(its))
+c
+c       Call the auxillary routine to read the quadrature rules.
+c
+        call radinit0(ier,iw,max,nr,nt,rad(ins),rad(ixs),rad(iwhts),
+     -    rad(irs),rad(its),norder)
+        if (ier .ne. 0) return
+c
+        close(iw)
+        return
+c
+c       We arrive here on IO errors.
+c
+ 1000 continue
+        ier = 128
+        return
+        end
+c
+c
+c
+        subroutine radinit0(ier,iw,max,nr,nt,ns,xs,whts,rs,ts,norder)
+        implicit double precision (a-h,o-z)
+        dimension ns(nt,nr),rs(2,1),ts(2,1)
+        dimension xs(max,nt,nr),whts(max,nt,nr)
+        character*2 str
+c
+        ier = 0
+ 0100 format (I3.3)
+ 0200 format (D44.36)
+c
+c       Read each of the quadrature rules from the text file.
+c        
+        do 1100 ir=1,nr
+        do 1200 it=1,nt
+c
+c       Read the quadrature.
+c
+        read (iw,0100) nn
+        read (iw,0200) (xs(i,it,ir),i=1,nn)
+        read (iw,0200) (whts(i,it,ir),i=1,nn)
+c
+
+c$$$ 3000 format("$",I2,"$ &","$",E13.6,"$ & $",E13.6,"$ & $",E13.6,"$ & $",
+c$$$     -    E13.6," $ & $",I3,"$ \\")
+c$$$
+c$$$        call corrand3(1,dd)
+c$$$        if (dd .gt. .93d0) then
+c$$$        write (*,3000) norder,rs(1,ir),rs(2,ir),ts(1,it),ts(2,it),nn
+c$$$        endif
+c
+        ns(it,ir)=nn
+c
+ 1200 continue
+ 1100 continue
+c
+
+        end
+
+
+
+        subroutine linedist(x1,y1,x2,y2,r)
+        implicit double precision (a-h,o-z)
+c
+c       Find the point on the line segment connecting (x1,y1)
+c       and (x2,y2) which is closed to the origin.
+c
+        dx = (x2-x1)
+        dy = (y2-y1)
+c
+        t0 = 0
+        t1 = 1
+        t2 = -(x1*dx+y1*dy)/(dx**2+dy**2)
+c
+        if (0 .lt. t2 .AND. t2 .lt. 1) then
+        r2 = (x1+dx*t2)**2+(y1+dy*t2)**2
+        else
+        r2 = 10
+        endif
+
+        r0 = (x1+dx*t0)**2+(y1+dy*t0)**2
+        r1 = (x1+dx*t1)**2+(y1+dy*t1)**2
+c
+        r = min(r0,r1)
+        r = min(r,r2)
+        r = sqrt(r)
+c
+        end
+
+
+        subroutine raddiag(ier,rad,verts,nquad,xs,ys,whts)
+        implicit double precision (a-h,o-z)
+        dimension rad(1),xs(1),ys(1),whts(1),verts(2,3)
+c
+        dimension zs(2,10 000)
+c
+c       Return a quadrature for the evaluation of radially singular
+c       functions of the form (1) over an arbitrary triangle
+c       containing the origin.
+c
+c       Note that this routine will *fail* if the origin is too close 
+c       to the boundary; the precise tolerances depend on the
+c       precomputed quadrature table.
+c
+c                            Input Parameters:
+c
+c   rad - the radial quadrature structure generated by radial_init
+c   verts - a (2,3) array each column of which gives the coordinates
+c       of one vertex of the user-supplied triangle
+c
+c                           Output Parameters:
+c
+c   ier - an error return code;
+c       ier = 0     indicates succesful execution
+c
+c       ier = 64    means that one of the necessary quadrature rules is 
+c                   missing from the table in the rad structure; typically, 
+c                   this  indicates that the triangle is very close to 
+c                   degenerate
+c
+c       ier = 128   means that one of more of the vertices is *very*
+c                   close to the origin
+c
+c       ier = 256   means the origin is *very* close to the boundary
+c                   of the triangle
+c
+c       ier = 512   means that the vertices are nearly colinear
+c
+c
+c   nquad - the size of the quadrature rule
+c   (xs,ys) - the coordinates of the quadrature
+c                   
+c      
+        ier   = 0
+        nquad = 0
+c
+        norder = rad(21)
+c
+c
+c       Extract the coordinates of the vertices.
+c
+        x1 = verts(1,1)
+        y1 = verts(2,1)
+c
+        x2 = verts(1,2)
+        y2 = verts(2,2)
+c
+        x3 = verts(1,3)
+        y3 = verts(2,3)
+c
+c
+c       Build quadratures for each subtriangle.
+c
+        nquad = 0
+c
+        call raddiag0(ier,rad,x1,y1,x2,y2,nquad0,xs(nquad+1),
+     -    ys(nquad+1),whts(nquad+1))
+        if (ier .ne. 0) return
+        nquad = nquad+nquad0
+c
+        call raddiag0(ier,rad,x1,y1,x3,y3,nquad0,xs(nquad+1),
+     1    ys(nquad+1),whts(nquad+1))
+        if (ier .ne. 0) return
+        nquad = nquad+nquad0
+c
+        call raddiag0(ier,rad,x2,y2,x3,y3,nquad0,xs(nquad+1),
+     1    ys(nquad+1),whts(nquad+1))
+        if (ier .ne. 0) return
+        nquad = nquad+nquad0
+c
+        end
+
+
+
+        subroutine raddiag0(ier,rad,x1,y1,x2,y2,nquad,xs,ys,whts)
+        implicit double precision (a-h,o-z)
+        dimension rad(1),xs(1),ys(1),whts(1),verts(2,3)
+c
+        dimension amatr(2,2),ainv(2,2)
+        dimension ts(1000),twhts(1000)
+c
+c       Return a quadrature for evaluating radial singular functions
+c       of the form (1) over a triangle one of whose vertices is
+c       the origin.
+c
+c       Triangles of this type can be transformed via rotation, scaling,
+c       and, if necessary, reflection into the canonical form shown
+c       below:
+c
+c                              z3 = a e^{ib}
+c                              0
+c                             / \          
+c                            /   \         0<a<1
+c                           /     \        0<b<Pi
+c                          /       \         
+c                         /         \        
+c                        /           \ 
+c                       /             \
+c                      0---------------0
+c                   (0,0)            (1,0)
+c
+c
+c       Note: the user is responsible for ensure that the ouput arrays
+c       xs,ys, and whts are sufficiently large to hold the resulting
+c       quadrature formula.
+c
+c                            Input Parameters:
+c
+c   rad - the radial structure as returned by radial_init
+c   (x1,y1) - the coordinates of one of the vertices which is not the
+c       origin
+c   (x2,y2) - the coordinates of one of the other vertex which is not
+c       the origin
+c
+c                           Output Parameters:
+c
+c   ier - an error return code;
+c       ier = 0     indicates successful execution
+c
+c       ier = 64    means that one of the necessary quadrature rules is 
+c                   missing from the table in the rad structure; typically, 
+c                   this  indicates that the triangle is very close to 
+c                   degenerate
+c
+c       ier = 128   means that one of the user-supplied vertices is
+c                   the origin
+c
+c   nquad - the number of nodes in the resulting quadrature
+c   (xs,ys) - the coordinates of the quadrature nodes
+c   whts - the quadrature weights
+c
+        ier   = 0
+        nquad = 0
+c
+        call radtransform(x1,y1,x2,y2,alpha,phi,amatr,ainv,det)
+c
+c       Fetch the theta quadrature.
+c
+        call radfetch(ier,rad,alpha,phi,nts,its,itwhts)
+c
+        if (ier .ne. 0) then
+        print *,"radfetch failed"
+        print *,"alpah = ",alpha
+        print *,"phi = ",phi
+        ier = 64
+        stop
+        return
+        endif
+c
+c       Call an auxillary routine to build the product quadrature.
+c
+        call raddiag1(nts,rad(its),rad(itwhts),
+     -    nquad,xs,ys,whts,alpha,phi)
+c
+        do 1000 i=1,nquad
+        x = xs(i)
+        y = ys(i)
+        wht = whts(i)
+c
+        u = ainv(1,1)*x+ainv(1,2)*y
+        v = ainv(2,1)*x+ainv(2,2)*y
+        wht=wht/det
+c
+        xs(i) = u
+        ys(i) = v
+        whts(i) = wht
+ 1000 continue
+        end
+
+
+        subroutine raddiag1(nts,ts,twhts,
+     1     nquad,xs,ys,whts,alpha,phi)
+        implicit double precision (a-h,o-z)
+        dimension ts(1),twhts(1),amatr(2,2),ainv(2,2)
+        dimension xs(1),ys(1),whts(1)
+c
+        double precision, allocatable :: rs(:),rwhts(:)
+c
+c        dimension rs(10 000),rwhts(10 000)
+c
+        allocate(rs(10 000),rwhts(10 000))
+c
+        nquad = 0
+        do 1000 j=1,nts
+c
+        t    = ts(j)*phi
+        twht = twhts(j)*phi
+c
+        r0   = 0
+        r1   = alpha*sin(phi)/(alpha*sin(phi-t)+sin(t))
+c
+        nrs = norder/2+1
+        call legequad(nrs,rs,rwhts)
+        do 0100 i=1,nrs
+        rs(i)    = (r1-r0)/2*rs(i) + (r1+r0)/2
+        rwhts(i) = (r1-r0)/2*rwhts(i)
+ 0100 continue
+c
+        do 1100 i=1,nrs
+c
+        r    = rs(i)
+        rwht = rwhts(i)
+c
+        x    = r*cos(t)
+        y    = r*sin(t)
+        wht  = rwht*twht*r
+c
+        nquad = nquad+1
+        xs(nquad)   = x
+        ys(nquad)   = y
+        whts(nquad) = wht
+c
+ 1100 continue
+ 1000 continue
+
+c
+        end
+
+
+
+        subroutine radfetch(ier,rad,r,t,n,ixs0,iwhts0)
+        implicit double precision (a-h,o-z)
+        dimension rad(1)
+c
+c       Return pointers to the nodes and weights of one of the 
+c       precomputed quadrature formulae residing in the rad structure.
+c
+c                          Input Parameters:
+c
+c   rad - the structure returned by radial_init
+c   r - the value of the radial parameter
+c   t - the value of the angular parameter
+c
+c                         Output Parameters:
+c
+c   ier - an error return code;
+c       ier = 0   indicates succcessful execution
+c       ier = 64  means that the requested quadrature rule is mising
+c                 from the table stored in the rad structure
+c
+c   n - the number of quadrature nodes
+c   ixs0 - a pointer into the rad structure to the quadrature nodes
+c   iwhts0 - a pointer into the rad structure to the quadrature weights
+c 
+c
+        ier = 0
+        n   = 0 
+c
+c       Fetch data from the structure's header.
+c
+        nr     =  rad(1) 
+        nt     =  rad(2) 
+        irs    =  rad(3) 
+        its    =  rad(4) 
+        ins    =  rad(5) 
+        ixs    =  rad(6)
+        iwhts  =  rad(7) 
+        max    =  rad(8)
+c
+c       Call an auxillary routine to find the quadrature.
+c
+        call radfetch0(ier,max,nr,nt,rad(irs),rad(its),rad(ins),
+     1     rad(ixs),rad(iwhts),n,ii,r,t)
+c
+        ixs0   = ixs+ii-1
+        iwhts0 = iwhts+ii-1
+c
+        end
+c
+c
+c
+        subroutine radfetch0(ier,max,nr,nt,rs,ts,ns,xs,xwhts,
+     1    n,ii,r,t)
+        implicit double precision (a-h,o-z)
+        dimension rs(2,nr),ts(2,nt)
+        dimension ns(nt,nr),xs(max,nt,nr),whts(max,nt,nr)
+c
+        data eps / 1.0d-15 /
+        ier = 0
+c
+c       Figure out which quadrature rule to return.
+c
+        do 1000 ir=1,nr
+        if (rs(1,ir) .le. r .AND. r .le. rs(2,ir)+eps) goto 1100
+ 1000 continue
+        ier = 64
+        return
+ 1100 continue
+c
+        do 2000 it=1,nt       
+        if (ts(1,it) .le. t .AND. t .le. ts(2,it)+eps) goto 2100
+ 2000 continue
+        ier = 64
+        return
+ 2100 continue
+c
+c       Get the number of nodes and set the pointer.
+c
+        n   = ns(it,ir)
+        ii  = 1+max*(it-1)+max*nt*(ir-1)
+c
+        end
+c
+c
+c
+        subroutine rad2x2inv(amatr,ainv,det)
+        implicit double precision (a-h,o-z)
+        dimension amatr(2,2),ainv(2,2)
+c
+        det = amatr(1,1)*amatr(2,2)-amatr(1,2)*amatr(2,1)
+        ainv(1,1) =  amatr(2,2)/det
+        ainv(2,2) =  amatr(1,1)/det
+        ainv(1,2) = -amatr(1,2)/det
+        ainv(2,1) = -amatr(2,1)/det
+        end
+c
+c
+c
+        subroutine radinsort2(k,a,b)
+        implicit double precision (a-h,o-z)
+        dimension a(1),b(1)
+c
+        do 1000 i=2,k
+        val=a(i)
+        val2=b(i)
+        j=i-1
+        do 1100 while (j .ge. 1 .AND. a(j) .gt. val) 
+        a(j+1)=a(j)
+        b(j+1)=b(j)
+        j=j-1
+ 1100 continue
+        a(j+1)=val
+        b(j+1)=val2
+ 1000 continue
+        end
+c
+c
+c
+        subroutine radmove(k,a,b)
+        implicit double precision (a-h,o-z)
+        dimension a(1),b(1)
+        do 1000 j=1,k
+        b(j)=a(j)
+ 1000 continue
+        end
+
+
+
+
+
+        subroutine radadap_2x2inv(amatr,ainv,det)
+        implicit double precision (a-h,o-z)
+        dimension amatr(2,2),ainv(2,2)
+c
+        det = amatr(1,1)*amatr(2,2)-amatr(1,2)*amatr(2,1)
+        ainv(1,1) =  amatr(2,2)/det
+        ainv(2,2) =  amatr(1,1)/det
+        ainv(1,2) = -amatr(1,2)/det
+        ainv(2,1) = -amatr(2,1)/det
+        end
+
+
+
+
+        subroutine radtransform(x1,y1,x2,y2,alpha,phi,amatr,ainv,det)
+        implicit double precision (a-h,o-z)
+        dimension amatr(2,2),ainv(2,2)
+c
+c       Construct a transformation taking a user-specified triangle T
+c       with vertices
+c
+c         (0,0), (x1,y1) and (x2,y2)
+c
+c       to a triangle T0 with vertices
+c
+c         (0,0), (1,0), and (alpha cos(phi), alpha sin(phi))  
+c
+c            0 < alpha < 1,  0 < phi   < pi.
+c
+c       Also, return the inverse mapping and the determinant of
+c       the mapping.
+c
+c
+c                           Input Parameters:
+c
+c   (x1,y1) - coordinates of one of the nonzero vertices
+c   (x2,y2) - coordinates of the other nonzero vertex
+c
+c                          Output Parameters:
+c
+c   alpha - the radius of the 
+c   phi - the ngle 
+c
+c   amatr - the matrix mapping the triangle T to T0
+c   ainv - the matrix specifying the inverse of the mapping amatr
+c   det - the absolute value of the determinant of the matrix amatr
+c       
+c
+        r1 = (x1**2+y1**2)
+        r2 = (x2**2+y2**2)
+c
+        if (r1 .ge. r2) then
+        u1 = x1
+        v1 = y1
+        u2 = x2
+        v2 = y2
+        else
+        u1 = x2
+        v1 = y2
+        u2 = x1
+        v2 = y1
+        endif
+c
+        r1 = sqrt(u1**2+v1**2)
+c
+        theta      = atan2(v1,u1)
+        amatr(1,1) = cos(theta)/r1
+        amatr(1,2) = sin(theta)/r1
+        amatr(2,1) =-sin(theta)/r1
+        amatr(2,2) = cos(theta)/r1
+c
+        ainv(1,1) = cos(theta)*r1
+        ainv(1,2) =-sin(theta)*r1
+        ainv(2,1) = sin(theta)*r1
+        ainv(2,2) = cos(theta)*r1
+c
+        xx = amatr(1,1)*u2 + amatr(1,2)*v2
+        yy = amatr(2,1)*u2 + amatr(2,2)*v2
+        phi = atan2(yy,xx)
+        alpha = sqrt(xx**2+yy**2)
+c
+        if (phi .lt. 0) then
+        amatr(2,1)=-amatr(2,1)
+        amatr(2,2)=-amatr(2,2)
+        ainv(1,2) =-ainv(1,2)
+        ainv(2,2) =-ainv(2,2)
+        phi=-phi
+        endif
+c
+        det = (1/r1)**2
+c
+        end
+
+
+
+
+        subroutine legequad(n,xs,whts)
+        implicit double precision (a-h,o-z)
+        dimension xs(n),whts(n)
+        data pi /3.14159265358979323846264338327950288d0/
+c
+c       Use Newton's method and the recurrence relation to compute the
+c       nodes and weights of the n-point Gauss-Legendre quadrature.  The
+c       running time of this procedure grows as O(n**2), but it is 
+c       quite efficient for small n.  
+c
+c                            Input Parameters:
+c
+c   n - the size of the Legendre quadrature to compute
+c
+c                           Output Parameters:
+c
+c   xs - the n nodes of the n-point Gauss-Legendre quadrature on the 
+c       interval [-1,1]
+c   whts - the n weights of the n-point Gauss-Legendre quadrature on 
+c       the interval [-1,1]
+c
+        maxiters = 10
+c        pi       = acos(-1.0d0)
+c
+        call mach_zero(eps0)
+        eps0=eps0*10
+c
+c        eps0     = 1.0d-15
+c
+c       Use Newton and the recurrence relation to find half of the
+c       roots --- the others are obtained via symmetry.
+c
+c       Note that we also store the value of the derivative at the 
+c       obtained root for use in computing the weights below.
+c
+        ifodd = 0
+        nn = (n+1)/2
+        if (nn .ne. n/2) then
+        ifodd=1
+        nn=nn-1
+        endif
+c
+        do 2000 i=nn+1,n
+c
+c       Use Cheybshev node as initial approximation ....
+c
+c        x0 = cos(-pi+(2*i-1)*pi/(2*n))
+c
+c       ... or use a somewhat improved estimate.
+c
+        dk = i-nn-1
+        dn = n
+        theta = (4*(ceiling(dn/2)-dk)-1) / (4*dn+2) * pi
+c
+        x0 = 1.0d0 - (dn-1)/(8*dn**3)-1.0d0/(384.0d0*dn**4)*
+     1      (39.0d0-28.0d0/sin(theta)**2)
+c        
+        x0=x0*cos(theta)
+c
+c       Conduct Newton iterations.
+c
+        do 2100 iter=1,maxiters
+        call lege0(n,x0,pol,der)
+c
+        dd = pol/der
+        x0 = x0-dd
+c
+        if (abs(dd) .lt. eps0) then
+        xs(i)=x0
+        whts(i)=der
+        goto 2000
+        endif
+ 2100 continue
+c
+c       This doesn't happen.
+c
+        print *,"legeroots bombed!"
+        stop
+ 2000 continue
+c
+c       Compute the weights using the derivatives we stored above.
+c        
+        do 3000 j=nn+1,n
+        x       = xs(j)
+        dd      = 2.0d0/(1-x**2)
+        whts(j) = dd/whts(j)**2
+ 3000 continue
+c
+c       Reflect the quadrature on [0,1].
+c
+        do 4000 j=1,nn
+        xs(j)   = -xs(n-j+1)
+        whts(j) = whts(n-j+1)
+ 4000 continue
+c
+c       Handle the root at 0 if n is odd.
+c
+        if (ifodd .eq. 1) then
+        x0          = 0
+        call lege0(n,x0,pol,der)
+c
+        xs(nn+1)   = x0
+        whts(nn+1) = 2.0d0/der**2
+        endif
+c
+        end
+
+
+        subroutine lege0(n,x,pol,der)
+        implicit double precision (a-h,o-z)
+c
+c       Evaluate the Legendre polynomial of degree n and its derivative
+c       at the point x using well-known formulae.
+c
+c       NOTE: this routine does not evaluate the normalized polynomial
+c 
+c                           Input Parameters:
+c
+c   n - degree of the Legendre polynomial to evaluate
+c   x - point in the interval [-1,1] at which to evaluate the polynomial
+c
+c                          Output Parameters:
+c
+c   pol - the value of the polynomial at that point
+c   der - the value of the derivative of the polynomial at that point
+c
+c
+c       Handle orders 0 and 1.
+c
+        if (n .eq. 0) then
+        pol = 1
+        der = 0
+        return
+        endif
+c
+        if (n .eq. 1) then
+        pol = x
+        der = 1
+        return
+        endif
+c
+c       Use the well-known recurrence relation.
+c
+        p1 = 1
+        p2 = x
+c
+        do 1000 j=2,n
+        p  = ((2*j-1)*x*p2-(j-1)*p1)/j
+        p1 = p2
+        p2 = p
+ 1000 continue
+c
+        pol = p
+c
+c       Compute the derivative using another well-known formula.
+c
+        d=x**2-1
+        der=n*(x*p2-p1)/d
+c
+        end

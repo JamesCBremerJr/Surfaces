@@ -1,0 +1,48 @@
+#!/bin/sh
+
+#export FC="gfortran -O2 -w -llapack -fopenmp -fdefault-integer-8"
+export FC="ifort -O3 -mkl -i8"
+export CC="gcc"
+export CPP="g++"
+export DSTRIP="./dstrip"
+
+# build the dstrip utility
+$CC -o dstrip dstrip.c
+
+FILE="scattering"
+
+DFILES="corthom               \
+        discretize            \
+        cfactor               \
+        octree                \
+        selfquad              \
+        radial                \
+        utils                 \
+        plot                  \
+        print 
+"
+
+LFILES=""
+
+for file in ${DFILES}
+do
+LFILES="${LFILES} ${file}.o"
+done
+
+# compile the code from which debugging headers are to be stripped.
+./FCOMP $DFILES
+
+# link 'em
+echo linking ...
+${FC} -o int2 ${FILE}.f ${LFILES}
+rm -f ${FILE}.o
+
+
+read -p "hit enter to run ..." var
+echo ""
+echo ""
+
+#rm -f gn*
+#rm -f fort*
+
+./int2

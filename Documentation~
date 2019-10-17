@@ -1,0 +1,37 @@
+The following files contain components used by both the discretization code and the
+fast solver.
+
+1.  The file print.f contains basic printing routines.
+
+2.  The file utils.f contains a few miscellaneous utility routines, including
+subroutines for sorting and returning random numbers.
+
+--------------------------------------------------------------------------------
+
+The following files constitute the discretization code:
+
+1.  The file radial.f contains code for generating quadratures for a class
+of radially singular integrals which arise in the discretization of the integral
+operators of scattering theory on surfaces.
+
+2.  The file selfquad.f contains a simple code for applying an adaptive change
+of variables to a class of singular integrals which arise in the discretization
+of integral operators.  This change of variables greatly simplifies the 
+numerical evaluation of said integrals.
+
+3.  The file discretize.f contains a code for the discretization of weakly
+singular integral operators on surfaces.
+
+--------------------------------------------------------------------------------
+
+The following files constitute the accelerated direct solver code:
+
+1.  The file octree.f contains a code for constructing an octree for a user-
+specified collection of points and performing range searches.
+
+2.  The file scattering.f contains a code for compressing integral operators
+via scattering matrices.
+
+
+
+

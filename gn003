@@ -1,0 +1,3 @@
+ set terminal wxt
+ unset key
+ splot "gn003.dat" with points pointtype 7 pointsize .25
