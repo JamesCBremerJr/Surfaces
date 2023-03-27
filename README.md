@@ -5,3 +5,5 @@ entitled
 
 "A NYSTROM METHOD FOR WEAKLY SINGULAR INTEGRAL OPERATORS ON
 SURFACES"
+
+This code is release under version 2 of the GPL.  Please see the file LICENSE for details.
